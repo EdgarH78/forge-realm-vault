@@ -30,9 +30,10 @@ Velocity must never be bought by sacrificing system predictability. No runaway a
 * [[UI-Service]] — Vite/React/PIXI browser client (port 5173); plugin-based modules; SSE consumer.
 * [[API-Service]] — Fastify gateway (port 3001); routes, JWT middleware, SSE relay, both Postgres pools.
 * [[Worker-Service]] — Pub/Sub-driven background processor; no HTTP surface; cron + sync clients to ImageService and RenderService.
-* [[PubSub-Topology]] — Nine topic/subscription pairs; request/event duality; durable DB write + ephemeral liveness signal.
+* [[PubSub-Topology]] — Six request/events topic pairs (plus DLQ); request/event duality; durable DB write + ephemeral liveness signal; the canonical drift surface.
 * [[ImageService]] — .NET 8 stateless processor (port 5100); chroma-key / SAM / bbox-crop / resize / WebP.
 * [[RenderService]] — Headless Chromium (port 5200); single warm Playwright browser; renders SerializedMap → PNG.
+* [[Deployment]] — GitHub Actions → Cloud Build pipeline; parallel image builds, ordered Pub/Sub + DB + service rollout; two URL-injection passes wire services together.
 
 ### Subsystem: Asset Domain
 * [[Asset]] — Core immutable entity; identity, status, visibility, builders, authz rule.

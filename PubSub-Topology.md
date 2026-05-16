@@ -1,13 +1,13 @@
 ---
-Summary: Nine topic/subscription pairs wire the service mesh. Every long-running operation has a **request** topic ([[Worker-Service]] subscribes) and an **events** topic ([[API-Service]] subscribes for SSE relay). The "DB write is truth, Pub/Sub is liveness" rule from [[Architecture-Decoupling]] §4 applies — every consumed event also writes a row to `generation_events` so a reconnecting subscriber can reconstruct history. Local dev uses the GCP cloud-sdk emulator on port 8085 with topics auto-created on container start.
+Summary: Six request/events topic pairs (plus DLQ) wire the service mesh. Every long-running operation has a **request** topic ([[Worker-Service]] subscribes) and usually an **events** topic ([[API-Service]] subscribes for SSE relay). The "DB write is truth, Pub/Sub is liveness" rule from [[Architecture-Decoupling]] §4 applies — every consumed event also writes a row to `generation_events` so a reconnecting subscriber can reconstruct history. Local dev uses the GCP cloud-sdk emulator on port 8085 with topics auto-created on container start; prod provisions through [[Deployment]]'s `ensure-pubsub` step.
 Tags: #pubsub #service-mesh #events #atlasforge
 ---
 
 # PubSub-Topology
 
-## The nine pairs
+## The pairs
 
-From `docker-compose.yml`'s `pubsub-setup` container, created exactly once per environment:
+From `docker-compose.yml`'s `pubsub-setup` container in local dev, and from `cloudbuild.yaml`'s `ensure-pubsub` step in prod ([[Deployment]]):
 
 | Request topic | Events topic | Purpose |
 |---|---|---|
@@ -68,9 +68,24 @@ Every Pub/Sub client sees `PUBSUB_EMULATOR_HOST=pubsub:8085` and `GOOGLE_CLOUD_P
 Same APIs, real GCP Pub/Sub project. Differences:
 
 - `PUBSUB_EMULATOR_HOST` unset; client uses Application Default Credentials.
-- Topics + subscriptions created by Terraform / `cloudbuild.yaml`, not by a setup container.
-- Subscription configs: `ackDeadlineSeconds = 600` for the agent and image-gen subscriptions (LLM calls can take minutes); `expirationPolicy.ttl` set to 31 days so subscriptions don't get garbage-collected.
-- Dead-letter topic configured on every subscription with `maxDeliveryAttempts = 5` — chronic redeliveries land in a DLQ topic for inspection rather than poisoning the live stream.
+- Topics + subscriptions created by `cloudbuild.yaml`'s `ensure-pubsub` step (see [[Deployment]]), not by a setup container. The script is idempotent: `describe ... || create`.
+- Subscription configs: `--ack-deadline=600` on every request subscription (LLM calls can take minutes).
+- Dead-letter topic (`atlas-dead-letters`) wired to every request subscription with `--max-delivery-attempts=5`. **gcloud rejects values below 5** — the minimum was raised by GCP in 2026. If you see "argument --max-delivery-attempts: Value must be greater than or equal to 5", that's the constraint.
+- Pub/Sub service account `service-${PROJECT_NUMBER}@gcp-sa-pubsub.iam.gserviceaccount.com` gets `roles/pubsub.publisher` on the DLQ topic and `roles/pubsub.subscriber` on every request subscription — the cloudbuild script grants these at every deploy.
+
+## Adding a new topic
+
+A subscription added in app code must be added in **three** places. Skipping any of them produces a deploy that builds + pushes + provisions cleanly, but crashes the worker at startup in prod because `waitForSubscription` throws on the missing subscription.
+
+1. **Consuming code** — `apps/worker/src/index.ts` (or wherever) reads the subscription name from an env var with a hardcoded default: `process.env.ASSET_REPROCESS_REQUESTS_SUBSCRIPTION || 'atlas-asset-reprocess-requests-sub'`. The default IS the prod name.
+2. **Local dev provisioner** — append the tuple `('atlas-X-requests', 'atlas-X-requests-sub')` (and the matching `-events` tuple if there's an events topic) to `topics_subs` in `docker-compose.yml` under the `pubsub-setup` container.
+3. **Prod provisioner** — `cloudbuild.yaml` `ensure-pubsub` step has **three** shell strings to update:
+   - `topics="..."` — add both `atlas-X-requests` and `atlas-X-events` (every topic must exist before any subscription can be created against it).
+   - `request_subs="..."` — add `atlas-X-requests-sub:atlas-X-requests` so the worker subscription gets DLQ wiring.
+   - `event_subs="..."` — add `atlas-X-events-sub:atlas-X-events` ONLY if a service (usually [[API-Service]]) subscribes to it for SSE relay. Fire-and-forget event topics don't need an events subscription.
+4. **Update the table above** in this note so the compass tracks reality.
+
+There is no CI guard that enforces these three places agree. The dominant failure pattern: vitest passes (subscription is mocked), local dev works (docker-compose has the entry), prod deploy ships, worker crash-loops on startup, TCP probe times out, deploy is marked failed. The only diagnostic is `gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="atlasforge-worker"' --freshness=15m` — the cloudbuild log only says "container failed to start". See [[Deployment]] § "Health checks and rollback".
 
 ## What is NOT in Pub/Sub
 

@@ -31,6 +31,46 @@ Tags: #service #api #fastify #sse #atlasforge
 | `/api/credits/*` | balance, ledger, tier sync |
 | `/api/media/sign`, `/api/media/wall-thumb` | signed read URLs + a 200-entry LRU thumb cache |
 
+## Layering — non-negotiable
+
+Every route in `apps/api/` follows the same three-layer shape. **No exceptions for "debug-only", "internal", or "small" routes** — the layering is what keeps the service testable, swappable, and consistent.
+
+```
+HTTP handler (apps/api/src/routes/*.ts)
+   │   parses request, calls one or more application services,
+   │   serializes response. Contains zero SQL, zero business logic,
+   │   zero direct database access.
+   ▼
+Application service (apps/api/src/application/*.ts)
+   │   orchestrates repositories, applies business rules, owns
+   │   transactions. Returns domain types, not raw rows.
+   ▼
+Repository (apps/api/src/infrastructure/*Postgres.ts)
+   │   the only layer that knows SQL. One repository per aggregate
+   │   (Asset, Map, Palette, etc.). Implements an interface defined
+   │   alongside the domain entity in packages/schema.
+```
+
+**Hard rules:**
+
+- **No inline SQL in route handlers.** If a route needs data, the route imports a service, the service uses a repository, the repository runs the query. A route that pastes a `pool.query(...)` is a bug, not a shortcut.
+- **No new fields in route handlers.** Domain shape lives in `packages/schema`. If a route needs to return a new shape, define it there.
+- **One repository per aggregate.** Cross-aggregate reads (e.g. "failures across assets + generations") go in an application service that calls both repositories, not in a god-repository.
+- **Repositories return domain objects, not rows.** `Row → DomainEntity` mapping happens at the repo boundary so services never see snake_case columns.
+
+This applies to anything new — read endpoints, debug endpoints, admin endpoints, internal tooling endpoints. Same rule.
+
+## Consumers call the API through typed clients
+
+Every consumer of the API — [[UI-Service]], [[Worker-Service]], [[RenderService]] (limited), and any internal tool like the local debug MCP server — talks to the API through a **typed client class**, never `fetch<unknown>` with inline JSON.parse.
+
+- A consumer-side `ApiClient` (or `XxxClient`) class exposes one method per endpoint it uses.
+- Each method has an explicit return type. Response shapes are declared as `interface` / `type` in the consumer's own source (or, when sharing makes sense, in `packages/client` / `packages/schema`).
+- The client wraps auth (JWT minting / refresh), base URL, error mapping. Tools / route handlers / agents call client methods, never `fetch` directly.
+- `unknown` and `any` in API response handling are smells. If you find yourself writing `const x = await fetch(...) as unknown`, stop and add the type.
+
+This is what makes consumers refactor-safe when the API surface evolves: a method signature change surfaces as a TypeScript error, not a runtime crash three calls down.
+
 ## Auth middleware
 
 `apps/api/src/middleware/auth.ts` decorates every protected route with `request.user: { userId, tier }`. It accepts **two issuer classes** of HS256 JWT signed with `JWT_SECRET_CURRENT`:

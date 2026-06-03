@@ -14,6 +14,7 @@ Velocity must never be bought by sacrificing system predictability. No runaway a
 ### Foundational Rules
 * [[Architecture-Determinism]] — Rules for state mutation and logic isolation.
 * [[Architecture-Decoupling]] — The seven mechanisms that keep no two subsystems knowing about each other directly.
+* [[Type-Discipline]] — Type safety beats convenience: no `null`/`undefined` for domain values, no `unknown` past a deserialization boundary, no `any` anywhere. Applies to writing code, not just reviewing it.
 
 ### Subsystem: Canvas & Geometry
 * [[PolyPathVector]] — Composite immutable vector; the canonical multi-segment shape.
@@ -52,3 +53,9 @@ Velocity must never be bought by sacrificing system predictability. No runaway a
 * [[MapForgeAgent]] — Concrete orchestrator for AI map creation; drives the clarify→plan→approve→execute lifecycle.
 * [[PhaseOrchestrator]] — Deterministic sequential phase runner; dual-channel events; rigid counterpart to DeepAgent.
 * [[AgenticImageGenerationPipeline]] — Inner assess→refine→generate→evaluate retry loop with severity-classified gates.
+* [[Test-Capture-Wrappers]] — The `_*` invoke-var convention by which agent call sites stamp room / attempt / promptName metadata onto `rendered.parameters`, where the auditing decorators read it for capture attribution. `_promptName` is system-reserved (non-spoofable).
+
+### Subsystem: Review & Capture Tooling
+* [[Review-Service]] — Localhost-only Fastify backend + React SPA for human review of AI output; one source — the `agent_runtime` audit DB — with signed asset images and reviewer tags persisted to `stage_tags` via a narrowly-scoped RW pool.
+* [[Review-Hierarchy-UI]] — The review frontend: a hierarchical Phase→Level→Room→Step tree built from the flat manifest, asset-generation-once-per-room, the render-fix attempt timeline, and live-run polling.
+* [[Review-Capture-Pipeline]] — How Map Forge + Asset Forge runs get captured: the auditing decorators (`AuditingLLM` / `AuditingImageGenerator` / `AuditingRenderClient`) write to the `agent_runtime` tree via `AuditRunContext`; `AssetPersister` links accepted + rejected assets with a P-3 verdict.

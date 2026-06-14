@@ -1,5 +1,5 @@
 ---
-Summary: The AtlasForge Review Service — a localhost-only Fastify backend + React SPA for human review of AI-generated Map Forge and Asset Forge runs. **One source:** the `agent_runtime` audit DB (the stage·action·artifact tree the worker's auditing decorators write). The file-capture path that used to mirror the same wire contract off `apps/worker/test-fixtures/**/__output__/` was retired in PRs R-3 + R-4 (2026-06). Reviewer tags persist back to `agent_runtime.stage_tags` on a separate, narrowly-scoped RW connection; asset images serve as short-lived signed URLs (GCS in prod, MinIO locally). Still localhost-only, no-auth. The audit-tree projection is [[Review-Capture-Pipeline]]; the UI is [[Review-Hierarchy-UI]].
+Summary: The AtlasForge Review Service — a localhost-only Fastify backend + React SPA for human review of AI-generated Map Forge and Asset Forge runs. **One source:** the `agent_runtime` audit DB (the stage·action·artifact tree the worker's auditing decorators write). The file-capture path that used to mirror the same wire contract off `apps/worker/test-fixtures/**/__output__/` was retired in PRs R-3 + R-4 (2026-06). The projection is now **tree-shaped**: `projectRunTree` / `projectNodeDetail` ship the audit tree 1:1 (the old flatten-and-reconstruct `projectManifest`/`projectStageDetail` path and the per-asset gallery were deleted in the LangGraph redesign Phase 6, 2026-06). Reviewer tags persist back to `agent_runtime.stage_tags` on a separate, narrowly-scoped RW connection; asset images serve as short-lived signed URLs (GCS in prod, MinIO locally). Still localhost-only, no-auth. The capture side is [[Review-Capture-Pipeline]]; the UI is [[Review-NodeTree-UI]].
 Tags: #review #tooling #atlasforge #service-architecture
 ---
 
@@ -13,7 +13,7 @@ The agent pipelines ([[MapForgeAgent]], [[AgenticImageGenerationPipeline]]) make
 
 ## One source: the agent_runtime audit DB
 
-Every run — Map Forge and Asset Forge — is captured into `agent_runtime.{stages, actions, action_artifacts}` by the auditing decorators ([[Review-Capture-Pipeline]]). The review service projects that tree back into the same `MapForgeManifest` / `MapForgeStageDetail` / `AssetFixtureDetail` wire contract the frontend has always consumed; the frontend has no knowledge of how the run was captured.
+Every run — Map Forge and Asset Forge — is captured into `agent_runtime.{stages, actions, action_artifacts}` by the auditing decorators ([[Review-Capture-Pipeline]]). The review service projects that tree **as-is** into the tree-shaped `RunTree` / `NodeDetail` wire contract the frontend consumes (`auditProjection.ts`: `projectRunTree` ships structure + cheap fields, `projectNodeDetail` resolves one node's artifact bodies lazily). The frontend renders it directly with no reconstruction. The earlier flatten path (`projectManifest` → flat `MapForgeManifest.stages[]`, re-bucketed by `promptName`) and the separate asset-gallery projection were deleted in Phase 6.
 
 The Phase-D `REVIEW_DB_ENABLED` flag and the file-capture sibling repos (`RunRepository`, `MapForgeRunRepository`, `MapForgeAssetGallery`, `AssetReviewAggregator`) were removed by PRs R-3 / R-4 / R-5 once the audit-tree path reached parity (R-1 linked accepted+rejected assets via `asset-persist` actions; R-1b extended capture to the Asset Forge / bg-removal-retry generation path; R-2 + later P-3 added the per-asset gallery, verdict (attempt history), final-render snapshot, and v1 raw image).
 
@@ -21,7 +21,7 @@ The Phase-D `REVIEW_DB_ENABLED` flag and the file-capture sibling repos (`RunRep
 
 | Pool | Driver | Permissions | Used by |
 |------|--------|-------------|---------|
-| `agent_runtime` RO | `agentDbPool` | `default_transaction_read_only=on` | `MapForgeRunRepositoryDb`, `MapForgeAssetGalleryDb`, signed-image route |
+| `agent_runtime` RO | `agentDbPool` | `default_transaction_read_only=on` | `MapForgeRunRepositoryDb`, signed-image route |
 | `atlasforge` RO (assets) | `assetDbPool` | RO | `AssetPathResolver` (signed-URL resolution), `AuditAssetResolver` (label + rejected-parent + v2→v1 raw resolution) |
 | `agent_runtime` RW (tags only) | `stageTagsRwPool` | grant: `INSERT/DELETE` on `agent_runtime.stage_tags` only | `StageTagWriter` |
 
@@ -71,13 +71,13 @@ The DB indexer (`listRuns`) reads only root stages (`parent_stage_id IS NULL`); 
 
 ## Server shape
 
-`backend/src/index.ts` constructs the three pools, the `AuditAssetResolver` (shared between repo + gallery), the `MapForgeRunRepositoryDb`, the `MapForgeAssetGalleryDb`, the signed-image router, and the optional `StageTagWriter`. Routes register in three modules: `mapForgeRuns.ts` (run + stage + asset detail + tag CRUD), `agentAssetImages.ts` (signed redirect), and a small standalone-asset route for the bg-removal-retry slug fallback. Binds `127.0.0.1:3002` by default; Docker overrides host via `REVIEW_SERVICE_HOST`. **No auth by design** — localhost-only, single reviewer.
+`backend/src/index.ts` constructs the three pools, the `AuditAssetResolver` (feeds the tree projector's asset descriptors), the `MapForgeRunRepositoryDb`, the signed-image router, and the optional `StageTagWriter`. Routes register in two modules: `mapForgeRuns.ts` (run-dir listing + `/tree` + `/nodes/:nodeId` + tag CRUD) and `agentAssetImages.ts` (signed redirect); `runs.ts` serves the cross-pipeline `/api/runs` index. Binds `127.0.0.1:3002` by default; Docker overrides host via `REVIEW_SERVICE_HOST`. **No auth by design** — localhost-only, single reviewer.
 
 UUID validation is uniform and load-bearing: `UUID_RE` gates every `runId` / `runDir` / `fixtureId` before the repo touches the DB. The seam returns null (→ 404) on unknown ids rather than throwing.
 
 ## Boundaries
 
 - Read the codebase for exact route signatures and response shapes — `backend/src/types.ts` is the authoritative wire contract.
-- The UI structure (hierarchical tree, asset cards, attempt timeline, planning bodies, clarify wizard) is its own atom: [[Review-Hierarchy-UI]].
+- The UI structure (node tree, node-detail tabs, artifact rendering, per-node tagging) is its own atom: [[Review-NodeTree-UI]].
 - How the tree gets *written* by the auditing decorators is [[Review-Capture-Pipeline]].
 - Production hardening (Google IAM OAuth, multi-reviewer, deploy posture) is deferred and explicitly out of scope today.

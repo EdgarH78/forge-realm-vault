@@ -1,5 +1,5 @@
 ---
-Summary: The background processor. No HTTP surface — every operation arrives as a [[PubSub-Topology]] message. Subscribes to five request topics and dispatches each to its handler: `AssetIngestionService` for new uploads, `ImageGenerationServiceV2` for agentic gen, [[MapForgeAgent]] for map creation, `AssetReprocessHandler` for thumbnail rebuilds, `MapExportProcessor` for dd2vtt exports. Cron jobs handle credit-expiry and Patreon tier reconciliation. Sync clients reach out to [[ImageService]] and [[RenderService]] over HTTP.
+Summary: The background processor. No HTTP surface — every operation arrives as a [[PubSub-Topology]] message. Subscribes to five request topics and dispatches each to its handler: `AssetIngestionService` for new uploads, `ImageGenerationServiceV2` for agentic gen, [[MapForgeAgent]] for map creation, `AssetReprocessHandler` for thumbnail rebuilds, `MapExportProcessor` for dd2vtt exports. Also owns the Patreon-driven credit **grants** ([[CreditSystem]]'s `CreditSyncService` on the tier-change topic) and a tier-reconciliation cron. (Credit **expiry** moved to a durable Temporal Schedule in [[Orchestrator-Service]].) Sync clients reach out to [[ImageService]] and [[RenderService]] over HTTP.
 Tags: #service #worker #pubsub #background #atlasforge
 ---
 
@@ -42,10 +42,11 @@ The [[API-Service]] publishes Pub/Sub messages with the originating user's JWT e
 
 ## Cron jobs
 
-- `startExpiryCronJob` — sweeps `atlasforge.credits` for expired cohorts and burns balances per the credit-expiration policy.
-- `startReconciliationJob` — periodically reconciles Patreon tier state against `atlasforge.user_tiers` via `CreditSyncService`. Drives entitlement changes on the API side.
+- `startReconciliationJob` — every 6h reconciles Patreon tier state against `atlasforge.user_tiers` via `CreditSyncService` (the fallback when a tier-change Pub/Sub event is missed). Per-row isolated: one poison auth-DB row logs and is skipped, not stalling the batch. Drives entitlement changes on the API side.
 
-Both are simple `setInterval` loops with cancellation on `SIGINT`. They share the same Postgres pool as the message handlers.
+A simple `setInterval` loop under a `pg_advisory_lock` (multi-instance safe), sharing the message handlers' Postgres pool.
+
+> **Credit expiry is NOT here anymore.** The old `startExpiryCronJob` (`setInterval` + advisory lock, burning expired cohorts) was removed in the Formance cutover — expiry is now a daily **Temporal Schedule** (`expireCohortsWorkflow`) in [[Orchestrator-Service]], and balances live in the Formance ledger, not a Postgres `credits` table. See [[CreditSystem]].
 
 ## Cross-package imports
 

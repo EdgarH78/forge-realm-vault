@@ -55,7 +55,15 @@ Velocity must never be bought by sacrificing system predictability. No runaway a
 * [[AgenticImageGenerationPipeline]] — Inner assess→refine→generate→evaluate retry loop with severity-classified gates.
 * [[Test-Capture-Wrappers]] — The `_*` invoke-var convention by which agent call sites stamp room / attempt / promptName metadata onto `rendered.parameters`, where the auditing decorators read it for capture attribution. `_promptName` is system-reserved (non-spoofable).
 
+### Subsystem: Orchestrator (ADK + Temporal)
+* [[Temporal]] — The durable workflow runtime: workers poll a task queue and run deterministic workflows + side-effecting activities. Activities are registered via `Worker.create({ activities })` and invoked by name at runtime. Registration/proxy mechanics, signals, child workflows, replay, local-vs-Cloud.
+* [[Orchestrator-Service]] — The `apps/orchestrator` Temporal worker replacing the hand-rolled agent pipeline ([[MapForgeAgent]] / [[PhaseOrchestrator]] / [[AgenticImageGenerationPipeline]]) with ADK agents on Temporal. In-progress migration; Pub/Sub stays ingress+egress so the API/UI contract is unchanged.
+* [[Temporal-Workflow-Activity-Boundary]] — The load-bearing orchestrator rules: deterministic workflows vs side-effecting activities, coarse activity grain, the closure-DI factory, idempotent side-effects, and the byte-compatible egress envelope.
+
+### Subsystem: Credits & Billing
+* [[CreditSystem]] — The credit economy on a self-hosted **Formance OSS ledger** (double-entry, append-only): cohorts as accounts, FIFO spend via ordered Numscript source sets, 3-month expiry burns, idempotency via the ledger `Idempotency-Key`, deterministic billing-cycle-keyed grants, cursor-only pagination, and `GET /api/credits/history` straight off the audit-trail-that-is-the-money. Postgres keeps only config (`action_costs`/`tier_credit_allotments`/`user_tiers`); ledger I/O is Temporal-activities-only.
+
 ### Subsystem: Review & Capture Tooling
 * [[Review-Service]] — Localhost-only Fastify backend + React SPA for human review of AI output; one source — the `agent_runtime` audit DB — with signed asset images and reviewer tags persisted to `stage_tags` via a narrowly-scoped RW pool.
-* [[Review-Hierarchy-UI]] — The review frontend: a hierarchical Phase→Level→Room→Step tree built from the flat manifest, asset-generation-once-per-room, the render-fix attempt timeline, and live-run polling.
+* [[Review-NodeTree-UI]] — The review frontend: a data-driven LangGraph-style node tree rendering the `agent_runtime` stage/action/artifact tree as-is (no client reconstruction), with lazy artifact bodies, Monaco/image-viewer dispatch, per-node `nodeRef` tagging, and live-run polling.
 * [[Review-Capture-Pipeline]] — How Map Forge + Asset Forge runs get captured: the auditing decorators (`AuditingLLM` / `AuditingImageGenerator` / `AuditingRenderClient`) write to the `agent_runtime` tree via `AuditRunContext`; `AssetPersister` links accepted + rejected assets with a P-3 verdict.

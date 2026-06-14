@@ -1,5 +1,5 @@
 ---
-Summary: How Map Forge and Asset Forge runs get captured for review. **One source:** the auditing decorators (`AuditingLLM`, `AuditingImageGenerator`, `AuditingRenderClient`) wrap the worker's outbound seams and write to the `agent_runtime` audit tree (stages · actions · action_artifacts). `AuditRunContext` (AsyncLocalStorage) tracks the open stage frame so each captured action attributes to the right room/attempt. `AssetPersister` links accepted assets via `recordAuditAssetOutput` (T-B7) and stamps a `verdict` (attempt history) on the artifact metadata; rejected candidates are linked the same way with `accepted=false`. Production Map Forge AND the integration tests both run through this path — the file-capture sibling (`StageManifestWriter` / `writeAttemptArtifacts` / `Capturing*`) was retired in PRs R-3 + R-4 (2026-06). [[Review-Service]] projects the resulting tree into the wire contract the frontend consumes; the UI is [[Review-Hierarchy-UI]].
+Summary: How Map Forge and Asset Forge runs get captured for review. **One source:** the auditing decorators (`AuditingLLM`, `AuditingImageGenerator`, `AuditingRenderClient`) wrap the worker's outbound seams and write to the `agent_runtime` audit tree (stages · actions · action_artifacts). `AuditRunContext` (AsyncLocalStorage) tracks the open stage frame so each captured action attributes to the right room/attempt. `AssetPersister` links accepted assets via `recordAuditAssetOutput` (T-B7) and stamps a `verdict` (attempt history) on the artifact metadata; rejected candidates are linked the same way with `accepted=false`. Production Map Forge AND the integration tests both run through this path — the file-capture sibling (`StageManifestWriter` / `writeAttemptArtifacts` / `Capturing*`) was retired in PRs R-3 + R-4 (2026-06). [[Review-Service]] projects the resulting tree as-is into the tree-shaped wire contract the frontend consumes (`projectRunTree` / `projectNodeDetail`); the UI is [[Review-NodeTree-UI]].
 Tags: #review #tooling #atlasforge #service-architecture #foundational
 ---
 
@@ -70,7 +70,7 @@ R-1b extended the same capture path to the standalone Asset Forge generation flo
 
 ## Projection back to the wire contract
 
-The review service projects `agent_runtime` rows back into the same `MapForgeManifest` / `MapForgeStageDetail` / `AssetFixtureDetail` wire contract the frontend has always consumed (see [[Review-Service]] for the wiring and `apps/review-service/backend/src/services/auditProjection.ts` for the pure projection functions). The frontend has no knowledge of the underlying source.
+The review service projects `agent_runtime` rows as-is into the tree-shaped `RunTree` / `NodeDetail` wire contract the frontend consumes (see [[Review-Service]] for the wiring and `apps/review-service/backend/src/services/auditProjection.ts` — `projectRunTree` / `projectNodeDetail` — for the pure projection functions). The frontend renders the tree directly; the flatten-and-reconstruct path was deleted in the LangGraph redesign Phase 6 (2026-06).
 
 ## What was retired (R-3 + R-4 + R-5, 2026-06)
 
@@ -83,6 +83,6 @@ The review service projects `agent_runtime` rows back into the same `MapForgeMan
 ## Boundaries
 
 - What reads the captured tree and serves it: [[Review-Service]].
-- How a reviewer navigates a run: [[Review-Hierarchy-UI]].
+- How a reviewer navigates a run: [[Review-NodeTree-UI]].
 - The pipelines being captured: [[MapForgeAgent]], [[PhaseOrchestrator]], [[AgenticImageGenerationPipeline]], [[AssetVersioning-and-Relationships]] (for the v2→v1 raw link).
 - Foundational rules cited: [[Architecture-Decoupling]] (DI, repositories, artifact handoff), [[Architecture-Determinism]] (audit truth = projector source of truth), [[Type-Discipline]] (narrow at the DB/JSON boundary).

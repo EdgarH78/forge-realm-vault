@@ -55,6 +55,16 @@ Three load-bearing rules:
 
 `findByVersionRoot(rootId)` returns every version of a root ordered by `version`. `Asset.getVersionHistory(assetRepo)` is the convenience wrapper.
 
+## Resolving "the latest version" (≠ relationships)
+
+Assets have **no version labels** (unlike [[Map]], which has `findVersionByLabel`). The current version of a family is resolved purely from the **version chain**, never from `asset_relationships`:
+
+- `AssetRepositoryPostgres.getLatestVersion(versionRootId)` → `WHERE version_root_id = $1 AND deleted_at IS NULL ORDER BY version DESC LIMIT 1`. Backed by the partial index `idx_assets_version_root_latest (version_root_id, version DESC) WHERE deleted_at IS NULL`, so it's an index seek to the first row — no sort despite the `ORDER BY`, just `LIMIT 1`. `findById(id)` is cheaper still: a primary-key fetch of one exact version (its join to `asset_files` is on that table's PK `sha256_hash`).
+
+Relationships (`extracted_from` / `assembled_from` / `rejected_candidate_for`) are a **separate lineage axis** and are never consulted to find the current version. Conflating the two is a common mistake: "latest" is a version-column query; relationships record how *distinct* assets derive from each other.
+
+**Orchestrator note (ADK+Temporal migration):** the asset-forge `evaluateImage` (and the coming refiner) activities reference images by the **exact version UUID** — `AssetVersionRef { assetId, version }` → `findById`, deliberately sidestepping "latest" so a replayed workflow always resolves the same bytes; `version` is asserted against the resolved row to catch a stale ref. Persist-then-evaluate writes each candidate as its own version and links rejects to the accepted asset via `rejected_candidate_for`.
+
 ## AssetRelationship
 
 Migration `014_create_asset_relationships.sql`:

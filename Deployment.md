@@ -65,6 +65,12 @@ Cloud Run assigns each service a URL like `https://atlasforge-worker-{hash}-uc.a
 
 The `update-env-vars` calls implicitly create a new Cloud Run revision per service. So the worker, api, and render-service each get deployed once then immediately rev'd a second time. Both revisions count toward the 1000-revisions-per-service quota; old revisions get garbage-collected after about a week.
 
+**Serialization rule (load-bearing):** when more than one step does `services update --update-env-vars` against the *same* service, those steps must be chained via `waitFor`, never left to run concurrently. Two concurrent updates race the revision baseline — one fails with a 409 (aborting the build) or is silently lost (last-writer-wins drops one set of env vars). `set-formance-url` (below) updates both api and worker, so it `waitFor`s `set-api-render-service-url` and `set-worker-image-service-url`.
+
+## Formance ledger (credit system)
+
+The self-hosted OSS `formancehq/ledger` (credit money state — see [[CreditSystem]]) deploys as its own step group: `mirror-formance-image` (copy the pinned ghcr.io image into Artifact Registry — Cloud Run can't deploy ghcr directly) → `formance-migrate` (explicit, failure-gating `ledger migrate` against Neon — *not* boot-time auto-migrate, so a bad ledger migration fails the deploy) → `deploy-formance-ledger` (`--no-allow-unauthenticated`, IAM is the only auth the standalone OSS ledger has) → `grant-ledger-invoker` (app compute SA + Cloud Build SA get `run.invoker`) → `init-formance-ledger` (idempotent ledger creation via an identity-token'd v2 call). Callers authenticate with a Google identity token (audience = the ledger's Cloud Run URL); `set-formance-url` injects `FORMANCE_URL`/`FORMANCE_LEDGER`/`FORMANCE_AUTH_MODE=idtoken` into api + worker. Durability is out-of-Neon: a daily Cloud Run Job (`Dockerfile.formance-backup`) `pg_dump`s to a GCS bucket in our own project (`scripts/setup-formance-backups.sh`).
+
 ## Auth and secrets
 
 - **GCP auth:** Workload Identity Federation maps the GitHub Actions OIDC token to the `scryforge-ci-cd@scryforge.iam.gserviceaccount.com` service account. No static keys are stored in GitHub.

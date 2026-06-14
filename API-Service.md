@@ -12,7 +12,7 @@ Tags: #service #api #fastify #sse #atlasforge
 1. Load dotenv (`.env.local` → `.env`).
 2. Configure Pub/Sub — set `GOOGLE_CLOUD_PROJECT` defaulted to `scryforge`; routing happens automatically once `PUBSUB_EMULATOR_HOST` is read by the client.
 3. Open `pg.Pool`s — `atlasforge` (5 conn dev / 20 prod) and `atlasforge_agents` (3 conn dev / 10 prod). `DATABASE_URL` / `AGENT_DATABASE_URL` env vars; `DATABASE_SSL` toggle.
-4. Construct repositories (Postgres) and application services (`AssetService`, `AssetRelationshipService`, `PaletteService`, `MapForgeService`, `CreditService`).
+4. Construct repositories (Postgres) and application services (`AssetService`, `AssetRelationshipService`, `PaletteService`, `MapForgeService`, `CreditService`). `CreditService` is backed by the **Formance** ledger ([[CreditSystem]]), not Postgres — it keeps the `atlasforge` pool only to read credit-config tables.
 5. Register routes + middleware (auth, rate-limit).
 6. Start SSE-relay subscriptions for four events topics.
 7. `app.listen(PORT, '0.0.0.0')` — default 3001.
@@ -28,7 +28,7 @@ Tags: #service #api #fastify #sse #atlasforge
 | `/api/assetStatus/*` | bulk status changes |
 | `/api/map-export/*` | enqueue dd2vtt exports + SSE stream |
 | `/api/mapForge/*` | start / resume / approve / reject [[MapForgeAgent]] generations + SSE per `generationId` |
-| `/api/credits/*` | balance, ledger, tier sync |
+| `/api/credits/*` | `balance` (+ action costs) and `history` (paginated grant/spend/expiry from the [[CreditSystem]] Formance ledger). userId is JWT-only — never a query param. |
 | `/api/media/sign`, `/api/media/wall-thumb` | signed read URLs + a 200-entry LRU thumb cache |
 
 ## Layering — non-negotiable
@@ -92,7 +92,7 @@ The API authors **no** agent state. Every event originates at [[Worker-Service]]
 
 ## Databases
 
-- `atlasforge` — `assets`, `asset_files`, `asset_relationships`, `asset_stretch_sections`, `palettes`, `palette_items`, `maps`, `map_versions`, `map_labels`, `credits_*`, etc. Migrations: `apps/api/migrations/*.sql`.
+- `atlasforge` — `assets`, `asset_files`, `asset_relationships`, `asset_stretch_sections`, `palettes`, `palette_items`, `maps`, `map_versions`, `map_labels`, plus credit **config** (`action_costs`, `tier_credit_allotments`, `user_tiers`), etc. Migrations: `apps/api/migrations/*.sql`. **Credit money is no longer here** — the `credit_cohorts`/`credit_deductions` ledger tables were dropped in the Formance cutover; balances live in the Formance ledger ([[CreditSystem]]).
 - `atlasforge_agents` — the `agent_runtime` schema: `sessions`, `turns`, `tasks`, `messages`, `tool_calls`, `prompt_calls`, `artifacts`, `checkpoints`, `generations`, `generation_events`. Migrations: `apps/api/migrations/agents/*.sql`.
 
 Both pools shut down cleanly on `SIGINT` — in-flight queries drain, then `pool.end()`.

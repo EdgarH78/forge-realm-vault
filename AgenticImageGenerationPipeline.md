@@ -5,7 +5,7 @@ Tags: #image-gen #retry-loop #superseded #atlasforge
 
 # AgenticImageGenerationPipeline  *(superseded)*
 
-> **Status: SUPERSEDED — code deleted.** `AgenticImageGenerationPipeline.ts` + the worker `IntentAssessor` / `PromptRefiner` / `ImageEvaluator` were removed (#583 handler cutover, #613 shared-class deletion). The live path is the Asset-Forge workflow in [[Orchestrator-Service]].
+> **Status: SUPERSEDED — code deleted.** `AgenticImageGenerationPipeline.ts` + the worker `IntentAssessor` / `PromptRefiner` / `ImageEvaluator` were removed (#583 handler cutover, #613 shared-class deletion). The live agent is **[[AssetForgeAgent]]** (the `assetForgeWorkflow` in [[Orchestrator-Service]]) — read that for the current implementation.
 
 ## What replaced it
 - The bounded `maxAttempts = 3` **retry loop** is now the `assetForgeWorkflow` orchestration; each step is a coarse, idempotent **activity** ([[Temporal-Workflow-Activity-Boundary]]).

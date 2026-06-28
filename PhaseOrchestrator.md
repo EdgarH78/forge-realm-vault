@@ -5,7 +5,7 @@ Tags: #map-forge #phase-state-machine #superseded #atlasforge
 
 # PhaseOrchestrator  *(superseded)*
 
-> **Status: SUPERSEDED — code deleted.** Removed with the `apps/worker/src/agents/` tree in #613. The live orchestration is the Temporal workflow tree in [[Orchestrator-Service]].
+> **Status: SUPERSEDED — code deleted.** Removed with the `apps/worker/src/agents/` tree in #613. Its role — sequencing the map-build phases — folded into the live **[[MapForgeAgent]]** workflow tree (`mapForgeParentWorkflow`) in [[Orchestrator-Service]]; read that for the current implementation.
 
 ## What replaced it
 - The rigid `{name, progressStart, progressEnd, run}` phase **sequence** (fixed at the call site, no replan — the rigid counterpart to [[DeepAgent]]) is now the **deterministic workflow** code itself: `mapForgeParentWorkflow` and its child workflows encode the order, and Temporal **replays** them for durability ([[Temporal]]). The canonical chain (topology → layout → top-down-reference → compile → eval → validate → commit) survives as workflow structure + activities.

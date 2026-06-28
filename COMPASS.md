@@ -49,11 +49,12 @@ Velocity must never be bought by sacrificing system predictability. No runaway a
 * [[AtlasUIElementRenderer]] — The React boundary; the single 1,375-line dispatcher; the only file that knows AtlasUI primitives in React land.
 
 ### Subsystem: Agent Pipeline
-*(Map-forge + asset-forge moved to the Orchestrator subsystem below; the three class atoms here are **SUPERSEDED** redirects kept for link integrity — the code was deleted in the ADK+Temporal migration.)*
+*(The map-forge + asset-forge agents are **live** — their implementations moved to Temporal in the ADK+Temporal migration but the agents persist as the orchestrator's workflow trees, below. The two **class** atoms here ([[PhaseOrchestrator]] / [[AgenticImageGenerationPipeline]]) are SUPERSEDED redirects — those worker classes were deleted; their roles folded into the live agents.)*
 * [[DeepAgent]] — Generic plan-reflect-execute loop; the open-ended runtime under `PromptAssistantAgent` (still live).
-* [[MapForgeAgent]] — **SUPERSEDED** (deleted #611/#613) → now `mapForgeParentWorkflow` in [[Orchestrator-Service]].
-* [[PhaseOrchestrator]] — **SUPERSEDED** (deleted #613) → now the Temporal child-workflow tree in [[Orchestrator-Service]].
-* [[AgenticImageGenerationPipeline]] — **SUPERSEDED** (deleted #583/#613) → now the Asset-Forge workflow in [[Orchestrator-Service]].
+* [[MapForgeAgent]] — **Live** — the map-forge agent: turns a prompt into a committed battlemap via the `mapForgeParentWorkflow` nested child-workflow tree (clarify→plan→approve→hero/topology/layout→dedup→asset-gen→compile→eval→commit) + ADK activities in [[Orchestrator-Service]].
+* [[AssetForgeAgent]] — **Live** — the asset-forge agent: one request → finalized background-removed asset via the `assetForgeWorkflow` assess→[refine→generate→evaluate]→persist→charge loop; runs standalone or as a child of [[MapForgeAgent]]'s dedup barrier.
+* [[PhaseOrchestrator]] — **SUPERSEDED** (worker class deleted #613) → its sequential phase chain is now the [[MapForgeAgent]] workflow structure in [[Orchestrator-Service]].
+* [[AgenticImageGenerationPipeline]] — **SUPERSEDED** (worker class deleted #583/#613) → now the [[AssetForgeAgent]] workflow in [[Orchestrator-Service]].
 * [[Test-Capture-Wrappers]] — The `_*` invoke-var convention by which agent call sites stamp room / attempt / promptName metadata onto `rendered.parameters`, where the auditing decorators read it for capture attribution. `_promptName` is system-reserved (non-spoofable).
 
 ### Subsystem: Orchestrator (ADK + Temporal)

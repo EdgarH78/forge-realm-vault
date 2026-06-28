@@ -1,5 +1,5 @@
 ---
-Summary: The background processor. No HTTP surface — every operation arrives as a [[PubSub-Topology]] message. Subscribes to five request topics and dispatches each to its handler: `AssetIngestionService` for new uploads, `ImageGenerationServiceV2` for agentic gen, [[MapForgeAgent]] for map creation, `AssetReprocessHandler` for thumbnail rebuilds, `MapExportProcessor` for dd2vtt exports. Also owns the Patreon-driven credit **grants** ([[CreditSystem]]'s `CreditSyncService` on the tier-change topic) and a tier-reconciliation cron. (Credit **expiry** moved to a durable Temporal Schedule in [[Orchestrator-Service]].) Sync clients reach out to [[ImageService]] and [[RenderService]] over HTTP.
+Summary: The (now slim) background processor. No HTTP surface — every operation arrives as a [[PubSub-Topology]] message. Subscribes to the remaining request topics: `AssetIngestionService` for new uploads, `AssetReprocessHandler` for preview/thumbnail rebuilds, `MapExportProcessor` for dd2vtt exports. **The agentic image-gen and map-forge handlers moved to [[Orchestrator-Service]]** (image-gen in Phase 1; map-forge at cutover #611, agent code deleted #613) — the worker no longer subscribes to `atlas-image-gen-requests` or `atlas-agent-requests`, and no longer calls [[RenderService]]. Also owns the Patreon-driven credit **grants** ([[CreditSystem]]'s `CreditSyncService` on the tier-change topic), a tier-reconciliation cron, and audit/asset retention jobs. (Credit **expiry** moved to a durable Temporal Schedule in [[Orchestrator-Service]].) Sync client reaches out to [[ImageService]] over HTTP.
 Tags: #service #worker #pubsub #background #atlasforge
 ---
 
@@ -13,28 +13,28 @@ Tags: #service #worker #pubsub #background #atlasforge
 2. Configure Pub/Sub (emulator vs prod, same logic as [[API-Service]]).
 3. Open Postgres pools — same `atlasforge` pool config but smaller (3 conn dev / 10 prod for agents DB).
 4. Wire prompt-store from disk (`PROMPTS_PATH` env, default `/app/packages/prompt-store/prompts`).
-5. Construct handlers — `AssetIngestionService`, `ImageGenerationServiceV2`, `MapForgeAgent`, `AssetReprocessHandler`, `MapExportProcessor`.
+5. Construct handlers — `AssetIngestionService`, `AssetReprocessHandler`, `MapExportProcessor`, `CreditSyncService`. (`ImageGenerationServiceV2` and `MapForgeAgent` were removed — those paths now run in [[Orchestrator-Service]].)
 6. Start all subscriptions. **Never opens an HTTP port.**
-7. Start cron jobs.
+7. Start cron + retention jobs.
 
 ## Subscriptions
 
 | Subscription | Handler | Purpose |
 |---|---|---|
 | `atlas-asset-ingest-requests-sub` | `AssetIngestionService.processIngest` | Hash → dedup → sharp process → upsert `asset_files` + create `assets` row (see [[AssetStorage]]) |
-| `atlas-image-gen-requests-sub` | `ImageGenerationServiceV2.run` | Drives [[AgenticImageGenerationPipeline]], persists accepted asset via `AssetPersister` |
-| `atlas-agent-requests-sub` | [[MapForgeAgent]].`handleCreate` / `handleMessage` / `handleApprove` (dispatched on message `type`) | Map generation lifecycle; invokes [[PhaseOrchestrator]] |
 | `atlas-asset-reprocess-requests-sub` | `AssetReprocessHandler` | Regenerate previews/thumbs against an existing `asset_file_sha256` |
 | `atlas-map-export-requests-sub` | `MapExportProcessor` | dd2vtt assembly via `Dd2vttAssembler` |
+| `atlas-tier-change-events-sub` | `CreditSyncService` | Patreon tier-change → credit grant ([[CreditSystem]]) |
 
-Each subscription's handler always acks — success or error. Errors are published as events on the matching `*-events` topic so the [[API-Service]] can relay them as SSE; Pub/Sub redelivery is reserved for outright handler crash. Idempotency is the handler's job (the ingestion service re-dedupes by sha256; map-forge resumes from the latest artifact).
+> **Moved to [[Orchestrator-Service]]:** `atlas-image-gen-requests-sub` (was `ImageGenerationServiceV2` → [[AgenticImageGenerationPipeline]]) and `atlas-agent-requests-sub` (was [[MapForgeAgent]] → [[PhaseOrchestrator]]) are now consumed by the orchestrator's Temporal ingress. Removed from the worker at Phase 1 / the map-forge cutover (#611, #613).
+
+Each subscription's handler always acks — success or error. Errors are published as events on the matching `*-events` topic so the [[API-Service]] can relay them as SSE; Pub/Sub redelivery is reserved for outright handler crash. Idempotency is the handler's job (the ingestion service re-dedupes by sha256).
 
 ## Sync HTTP clients
 
-The worker reaches out over HTTP to two stateless services:
+The worker reaches out over HTTP to one stateless service:
 
-- `IMAGE_SERVICE_URL` → [[ImageService]] — via `ImageServiceProcessingClient` for `POST /api/process` and via `DirectGeminiImageGenerator` for the multimodal Gemini path. Post-Phase-8 (260430-lx3), generation is direct-to-Gemini from the worker; image-service's `/api/generate` is legacy.
-- `RENDER_SERVICE_URL` → [[RenderService]] — `RenderClient` mints a fresh HS256 JWT per call with `iss=atlasforge-render`, `scope=assets:read`, short TTL. Used by `SelfEvalAndFixPhase` to capture per-room PNGs for the self-evaluator. The `IRenderClient` seam lets Plan 13-07's `CapturingRenderClient` slot in for the Map Forge review tool with zero source changes to [[MapForgeAgent]].
+- `IMAGE_SERVICE_URL` → [[ImageService]] — via `ImageServiceProcessingClient` for `POST /api/process`, used by `AssetReprocessHandler`'s preview/thumbnail regeneration (a deliberate subset of the old agentic pipeline). The worker's direct-to-Gemini generation path and its [[RenderService]] client (`RenderClient`, formerly used by the deleted `SelfEvalAndFixPhase` to capture per-room PNGs) both moved to [[Orchestrator-Service]] — generation is now the `generateAndProcess` activity, per-room rendering the `renderRoom` activity (mints its own per-call render JWT).
 
 ## JWT in message envelopes
 

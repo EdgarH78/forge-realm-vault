@@ -30,7 +30,7 @@ Velocity must never be bought by sacrificing system predictability. No runaway a
 ### Subsystem: Service Architecture
 * [[UI-Service]] — Vite/React/PIXI browser client (port 5173); plugin-based modules; SSE consumer.
 * [[API-Service]] — Fastify gateway (port 3001); routes, JWT middleware, SSE relay, both Postgres pools.
-* [[Worker-Service]] — Pub/Sub-driven background processor; no HTTP surface; cron + sync clients to ImageService and RenderService.
+* [[Worker-Service]] — Pub/Sub-driven background processor (now slim); no HTTP surface; asset-ingest/reprocess/export + Patreon credit grants + retention crons. Map-forge + image-gen moved to [[Orchestrator-Service]]; no longer calls RenderService.
 * [[PubSub-Topology]] — Six request/events topic pairs (plus DLQ); request/event duality; durable DB write + ephemeral liveness signal; the canonical drift surface.
 * [[ImageService]] — .NET 8 stateless processor (port 5100); chroma-key / SAM / bbox-crop / resize / WebP.
 * [[RenderService]] — Headless Chromium (port 5200); single warm Playwright browser; renders SerializedMap → PNG.
@@ -49,15 +49,16 @@ Velocity must never be bought by sacrificing system predictability. No runaway a
 * [[AtlasUIElementRenderer]] — The React boundary; the single 1,375-line dispatcher; the only file that knows AtlasUI primitives in React land.
 
 ### Subsystem: Agent Pipeline
-* [[DeepAgent]] — Generic plan-reflect-execute loop; the open-ended runtime under `PromptAssistantAgent`.
-* [[MapForgeAgent]] — Concrete orchestrator for AI map creation; drives the clarify→plan→approve→execute lifecycle.
-* [[PhaseOrchestrator]] — Deterministic sequential phase runner; dual-channel events; rigid counterpart to DeepAgent.
-* [[AgenticImageGenerationPipeline]] — Inner assess→refine→generate→evaluate retry loop with severity-classified gates.
+*(Map-forge + asset-forge moved to the Orchestrator subsystem below; the three class atoms here are **SUPERSEDED** redirects kept for link integrity — the code was deleted in the ADK+Temporal migration.)*
+* [[DeepAgent]] — Generic plan-reflect-execute loop; the open-ended runtime under `PromptAssistantAgent` (still live).
+* [[MapForgeAgent]] — **SUPERSEDED** (deleted #611/#613) → now `mapForgeParentWorkflow` in [[Orchestrator-Service]].
+* [[PhaseOrchestrator]] — **SUPERSEDED** (deleted #613) → now the Temporal child-workflow tree in [[Orchestrator-Service]].
+* [[AgenticImageGenerationPipeline]] — **SUPERSEDED** (deleted #583/#613) → now the Asset-Forge workflow in [[Orchestrator-Service]].
 * [[Test-Capture-Wrappers]] — The `_*` invoke-var convention by which agent call sites stamp room / attempt / promptName metadata onto `rendered.parameters`, where the auditing decorators read it for capture attribution. `_promptName` is system-reserved (non-spoofable).
 
 ### Subsystem: Orchestrator (ADK + Temporal)
 * [[Temporal]] — The durable workflow runtime: workers poll a task queue and run deterministic workflows + side-effecting activities. Activities are registered via `Worker.create({ activities })` and invoked by name at runtime. Registration/proxy mechanics, signals, child workflows, replay, local-vs-Cloud.
-* [[Orchestrator-Service]] — The `apps/orchestrator` Temporal worker replacing the hand-rolled agent pipeline ([[MapForgeAgent]] / [[PhaseOrchestrator]] / [[AgenticImageGenerationPipeline]]) with ADK agents on Temporal. In-progress migration; Pub/Sub stays ingress+egress so the API/UI contract is unchanged.
+* [[Orchestrator-Service]] — The `apps/orchestrator` Temporal worker that **replaced** the hand-rolled agent pipeline ([[MapForgeAgent]] / [[PhaseOrchestrator]] / [[AgenticImageGenerationPipeline]]) with ADK agents on Temporal. Map-forge + asset-forge **cut over** (worker agent code deleted #611/#613), Phase 4 (prod / Temporal Cloud) remaining; Pub/Sub stays ingress+egress so the API/UI contract is unchanged.
 * [[Temporal-Workflow-Activity-Boundary]] — The load-bearing orchestrator rules: deterministic workflows vs side-effecting activities, coarse activity grain, the closure-DI factory, idempotent side-effects, and the byte-compatible egress envelope.
 
 ### Subsystem: Credits & Billing

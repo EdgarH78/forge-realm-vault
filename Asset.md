@@ -19,7 +19,7 @@ The class has no setters. Every mutator returns a new `Asset` with the same `id`
 'Decals' | 'LightsFX' | 'Water' | 'Icons' | 'ConceptArt'
 ```
 
-`'ConceptArt'` is special: per-level hero images written by [[MapForgeAgent]]'s hero fan-out. They carry a non-null `mapId` and are **default-excluded from library search** — callers must opt in by passing `category: ['ConceptArt']` to the repository search method. Library callers never see them.
+`'ConceptArt'` and `'Intermediate'` are the map-forge **intermediate-image** categories — generation artifacts, not library assets. `ConceptArt` = per-level hero images; `Intermediate` = top-down room references + render snapshots. Both are **default-excluded from library search** (callers must opt in by passing the category explicitly to the repository search method — exclusion is keyed on **category**, not `mapId`), and `Intermediate` is pruned by retention. `mapId` is **non-null once the image is bound to a committed map** (the worker's `MapForgeAgent` path mints with `mapId` set), but is **`null` for pre-commit captures** — the ADK+Temporal orchestrator mints these before the `maps` row exists, so it binds `mapId` at map-commit time (migration Phase 2f), not at mint. Treat `mapId` as nullable for ConceptArt/Intermediate; never assume it is set.
 
 ## Status & lifecycle
 
@@ -66,7 +66,7 @@ isVisibleTo(userId, entitledPackIds = [], allowedStatuses = ['Active']):
 ## Where Asset shows up
 
 - **[[MapItem-Hierarchy]]**: `ISemanticItem` tags a vector with an `asset: Asset` reference; placement of objects/walls uses `facets.placement` from this entity.
-- **[[MapForgeAgent]]**: the hero fan-out writes one Asset row per level with `category = 'ConceptArt'` and `mapId` set.
+- **[[MapForgeAgent]]**: the worker hero fan-out writes one Asset row per level with `category = 'ConceptArt'` and `mapId` set; the references/render-snapshots are `Intermediate`. The ADK+Temporal orchestrator mints the same categories via a shared `IntermediateAssetPersister` but with `mapId = null` until map-commit (Phase 2f).
 - **[[AgenticImageGenerationPipeline]]**: every accepted generation lands as a new `Asset` row (status `'Active'` if accepted as primary, `'Rejected'` if persisted as a candidate fallback).
 - **AssetManagerModule** (system_module): the UI grid renders rows of `Asset` straight from `search()`; per-asset inspectors use the builders above.
 

@@ -56,11 +56,12 @@ process(parsed);
 ### Never acceptable
 
 - Carrying `unknown` through three or more call frames.
-- `as unknown as X` casts to silence the compiler. Fix the type hierarchy (see [[Architecture-Determinism]] and [[Architecture-Decoupling]] §2 Interface-First).
+- `as unknown as X` casts to silence the compiler. Fix the type hierarchy (see [[Architecture-Determinism]] and [[Architecture-Decoupling]] §2 Interface-First). **Production code only** — see §3 "Tests are exempt".
+- **A user-defined type predicate `v is X` whose body cannot actually establish `X`.** Same unsoundness as the cast above, with better camouflage: `as unknown as X` is greppable, a lying guard is not, so it survives an audit the cast would fail. Real example (found 2026-08-09, PR2): `isPolyPathLikeVector(v): v is IPolyPathVector` returned `true` for `v.type === 'annulus'`, but `AnnulusVector` has none of `IPolyPathVector`'s members — so every caller was entitled to call `getVectors()` on something that doesn't have it. It was a relocated `as unknown as` cast that had been laundered into a guard. If a predicate needs to admit a second shape, widen the return type (`v is IPolyPathVector | IAnnulusVector`) and widen the consumers to match; do not let the guard assert something false.
 
 ## 3. No `any`
 
-Hard rule. No exceptions in domain code, no exceptions in adapters, no exceptions in tests. Includes:
+Hard rule **in production code** — domain, adapters, services, UI. Includes:
 
 - Explicit `: any` annotations.
 - `Record<string, any>`.
@@ -69,6 +70,14 @@ Hard rule. No exceptions in domain code, no exceptions in adapters, no exception
 - `@ts-ignore` / `@ts-expect-error` comments that hide an `any`.
 
 The fix is almost always a discriminated union, a small generic, or a branded type — see §4.
+
+### Tests are exempt
+
+**Decided 2026-08-08.** Test files may use `as any` and `as unknown as X` freely. Production code gets the full discipline; tests do not.
+
+The rationale is that a test's job is to pin behavior, and the casts that show up there are almost always structural test doubles for third-party or infrastructure types (faking a PIXI `Application`, a `ViewPort`, a DI container) or deliberate reaches into private state to assert an invariant. Building a fully-typed seam for those buys type-safety on code that never ships, at the cost of test-file bulk and — worse — pressure to *not* assert the awkward thing. A tautological test that type-checks is far more dangerous than a real assertion behind an `as any`.
+
+This exemption covers `any`/`unknown` casts only. It does not license the rest of the discipline lapsing in tests: no `null`/`undefined` standing in for domain values (§1), and a test that reaches into privates should still say *why* in a short comment. And it is not a reason to leave production types loose so tests are easier to write — if a test needs a cast to reach production code, check first whether the production type is the thing that's wrong.
 
 ## 4. Type-system shapes we prefer
 

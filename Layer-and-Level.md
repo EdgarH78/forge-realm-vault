@@ -27,24 +27,35 @@ Spatial queries delegate to `IVectorRuntimeOps` (see [[Vector-Math-Extensions]])
 
 ## The standard layer stack
 
-From `foundation/layers.ts` — index → name and routing role:
+From `packages/schema/src/domain/map/layers.ts` — index → name and routing role.
+The indices **and** the routing rule live in `@atlasforge/schema` so producers outside the UI share them: `apps/ui/.../foundation/layers.ts` is a re-export, `DefaultLayerPolicy` delegates to `resolveLayerIndex`, and `DungeonIRCompiler` (map-ir) imports the same constants.
 
 | Index | Constant | Role |
 |---|---|---|
 | 0 | `TERRAIN_BACKGROUND` | Holds the terrain-background tile whose bounds define export crop (see [[Map]].`getMapBounds`) |
 | 1 | Terrain | Terrain brush strokes |
 | 2 | Water | Water tiles |
-| 3 | `FLOOR_LAYER` | Floor tiles (closed) |
-| 4 | `BASE_SHADOWS_LAYER` | Base-level cast shadows |
-| 5 | `OBJECTS_LAYER` | `MapObject` instances |
+| 3 | `FLOOR` | Floor tiles (closed) — **surface fill only** |
+| 4 | `BASE_SHADOWS` | Base-level cast shadows |
+| 5 | `OBJECTS` | `MapObject` instances — all content, whatever plane it depicts |
 | 6 | `WALLS` | Walls (default editing layer in `Map.createDefault`) |
-| 7 | Top Shadows | Above-wall shadows |
-| 8 | Misc | Catch-all for transient editing items |
-| 9 | Roofs | Top-most decorative layer |
+| 7 | `TOP_SHADOWS` | Above-wall shadows |
+| 8 | `MISC` | Catch-all for transient editing items |
+| 9 | `ROOFS` | Top-most decorative layer |
+
+### A layer holds either surface fill or content, never both
+
+Layer is a function of item **kind**, never of what the item depicts. Within a layer the only z-order is array index, so anything sharing `FLOOR` with the per-room floor tiles can be painted over by a tile emitted later. A rug and a wardrobe are both `kind: 'object'` and both belong on `OBJECTS`; that a rug lies flat is sort order *within* the layer, not a different layer.
+
+`DungeonIRCompiler` violated this before 2026-08-11 by routing `elevation_role: 'floor'` furnishings to `FLOOR`. Because it emits room-by-room as `[tile, ...items]`, a later room's floor tile buried an earlier room's objects — a live crypt run silently lost a staircase and four bone piles. The compiler now treats elevation role as a plane *within* `OBJECTS` (floor → table → ceiling, bottom to top), which is how `'ceiling'` always worked.
+
+**Sanctioned exception:** wall-attached objects (torches, brackets, door leaves) route to `WALLS`, not `OBJECTS`. `OBJECTS` (5) sits *below* `WALLS` (6), so conforming them to the kind rule would render every wall torch behind the wall image. This is the same carve-out `withItemInPlace` exists for, below.
 
 ## ILayerPolicy
 
-`ILayerPolicy.resolveLayerIndex(item)` returns the target layer index for newly-added items. `defaultLayerPolicy` (in `DefaultLayerPolicy.ts`) knows the `kind → layer` routing. `[[Map]].withItem(item)` consults it; `withItemInPlace(item)` deliberately bypasses it to preserve cross-policy item placements (e.g. wall-attached objects).
+`ILayerPolicy.resolveLayerIndex(item)` returns the target layer index for newly-added items. `defaultLayerPolicy` (in `DefaultLayerPolicy.ts`) narrows the live map item to its discriminators (`kind`, plus `tileType`/`shadowType`) and delegates to `resolveLayerIndex` in `@atlasforge/schema` — the shared rule, not a UI-local one. `[[Map]].withItem(item)` consults the policy; `withItemInPlace(item)` deliberately bypasses it to preserve cross-policy item placements (e.g. wall-attached objects — see the sanctioned exception above).
+
+Producers outside the UI mirror the rule rather than calling it when they also own intra-layer ordering: `DungeonIRCompiler` imports the indices but routes by hand, because it decides the floor/table/ceiling plane order that a kind-only rule cannot express. It warns (never throws — map generation charges credits along the way) if a non-tile reaches `FLOOR`.
 
 Custom policies are pluggable through the `Map` constructor's `layerPolicy` parameter, but the default is what production uses and what every test fixture assumes.
 

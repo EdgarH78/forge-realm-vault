@@ -19,6 +19,8 @@ It also hosts the [[CreditSystem]] Temporal surface: the `checkCredits`/`deductC
 ```
 apps/orchestrator/src/
   worker.ts        # composition root: builds deps, registers createActivities(deps)
+  config/          # boot-time env assertions (pure, injected env, so testable —
+                   #   worker.ts itself is coverage-excluded live-IO bootstrap)
   workflows/       # DETERMINISTIC only — no I/O, no Date, no adk/genai imports
   activities/      # all non-determinism: ADK agents, clients, side-effects
     createActivities.ts  # the closure-DI factory

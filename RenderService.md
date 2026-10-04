@@ -7,7 +7,7 @@ Tags: #service #render #headless #playwright #atlasforge
 
 ## Stack & shape
 
-`apps/render-service/` is Fastify 5 + Playwright 1.58 + TypeScript 5.5. Single binary, single process, single warm Chromium. `Dockerfile.render-service` ships Chromium + the UI's `dist/` bundle. Port 5200. `/health` is wired to return 503 *until* `BrowserPool.start()` completes, so the [[Worker-Service]] sees the service as ready only when it can actually render.
+`apps/render-service/` is Fastify 5 + Playwright 1.58 + TypeScript 5.5. Single binary, single process, single warm Chromium. `Dockerfile.render-service` ships Chromium + the UI's `dist/` bundle. Port 5200. `/health` is wired to return 503 *until* `BrowserPool.start()` completes, so a caller sees the service as ready only when it can actually render.
 
 ## BrowserPool — exactly one warm page
 
@@ -50,11 +50,20 @@ When the headless page's [[AtlasForgePixiCanvas]] resolves `CanvasImage` referen
 4. For dev: rewrites `localhost:9000` → `minio:9000` per `RENDER_STORAGE_REWRITE_FROM/TO` env vars so the headless browser inside the container can reach MinIO over the docker network.
 5. `route.continue()` with the modified request.
 
-The JWT in the closure is the same token the caller (typically [[Worker-Service]]'s `RenderClient`) provided. Its `iss=atlasforge-render, scope=assets:read` claim is what limits the blast radius — [[API-Service]] admits this token only on the four asset-read endpoints, and rejects everything else with 403.
+The JWT in the closure is the same token the caller ([[Orchestrator-Service]]'s `RenderServiceClient`) provided. Its `iss=atlasforge-render, scope=assets:read` claim is what limits the blast radius — [[API-Service]] admits this token only on the four asset-read endpoints, and rejects everything else with 403.
 
-## Caller — RenderClient
+## Caller — RenderServiceClient
 
-[[Worker-Service]] holds an `IRenderClient` instance (production: `RenderClient`; review tool: `CapturingRenderClient`). Each call mints a fresh HS256 JWT (`iss=atlasforge-render`, `scope=assets:read`, short TTL ~5min), POSTs to `/render`, and receives PNG bytes. The DI seam in [[MapForgeAgent]]'s constructor (`MapForgeAgentOptions.createRenderClient`) lets the Map Forge review tool swap in the capturing wrapper without source changes.
+[[Orchestrator-Service]] holds an `IRenderServiceClient` instance — `apps/orchestrator/src/render/RenderServiceClient.ts`.
+The worker's own `agents/RenderClient.ts` was deleted with the rest of its agent code in #611/#613, so the
+worker no longer reaches the render service at all.
+
+It reads `RENDER_SERVICE_URL` and throws `ConfigurationError` when it is unset (corrected 2026-08-16 —
+it used to default to `http://localhost:5200`, which inside the orchestrator container is the
+orchestrator, so a missing variable produced `fetch failed` per room and a GREEN run because the
+eval path is non-fatal). Each call mints a fresh HS256 JWT (`iss=atlasforge-render`, `scope=assets:read`, short TTL ~5min), POSTs to `/render`, and receives PNG bytes. The DI seam is `ActivityDeps.renderServiceClient` (`createActivities.ts`), injected once in
+`worker.ts`; `MapForgeAgentOptions.createRenderClient` and `CapturingRenderClient` went with the
+worker agent code in #611/#613 and no longer exist.
 
 ## Graceful shutdown
 

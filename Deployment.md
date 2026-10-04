@@ -61,7 +61,13 @@ Cloud Run assigns each service a URL like `https://atlasforge-worker-{hash}-uc.a
 
 - **Worker → Image Service.** `set-worker-image-service-url` runs `gcloud run services update worker --update-env-vars=IMAGE_SERVICE_URL=...` after both are deployed. The worker reads `IMAGE_SERVICE_URL` to call the `[[ImageService]]` sync endpoints.
 - **Render Service → API.** `deploy-render-service` looks up the API URL with `gcloud run services describe api` and bakes it into `RENDER_API_BASE_URL` at deploy time. Without this, the headless canvas's `fetch('/api/assets/:id')` falls through to the render-service's own origin (which has no `/api` routes) and silently 404s every asset, producing transparent renders.
-- **API → Render Service.** `set-api-render-service-url` does the same in reverse, updating the API after the render-service exists, so `/api/maps/:id/export` can proxy to the render service.
+- **API → Render Service.** `set-api-render-service-url` updates the API after the render-service
+  exists. NOTE (verified 2026-08-16): this step is currently a NO-OP. `apps/api` reads
+  `RENDER_SERVICE_URL` nowhere — `/api/maps/:id/export` reaches the render path via Pub/Sub and
+  `IStorageService`, with no HTTP client. The variable's only reader in the repo is
+  `apps/orchestrator/src/render/RenderServiceClient.ts`, and there is no orchestrator deploy step,
+  so the step costs a Cloud Run revision per deploy and configures nothing. When the orchestrator
+  is deployed, `RENDER_SERVICE_URL` belongs on IT, not on the API.
 
 The `update-env-vars` calls implicitly create a new Cloud Run revision per service. So the worker, api, and render-service each get deployed once then immediately rev'd a second time. Both revisions count toward the 1000-revisions-per-service quota; old revisions get garbage-collected after about a week.
 

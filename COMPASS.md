@@ -26,6 +26,8 @@ Velocity must never be bought by sacrificing system predictability. No runaway a
 * [[MapItem-Hierarchy]] — `IMapItem` contract, the three abstract base classes, and the concrete-kind catalog (Wall, Tile, Door, etc.).
 * [[Layer-and-Level]] — Container shapes that organize items; layer policy routes new items to their semantic home.
 * [[MapSerializer]] — JSON round-trip boundary; transient stripping, versioned migrations, asset-reference-only image persistence.
+* [[RoomGeometry]] — A building room is a scale tier + aspect bucket from one 40-entry table; dimensions, image ratio, feet and density are derived. Planner owns the tier, layout the ratio, the envelope is a box carved ≤15%; drift tests pin every prose restatement.
+* [[Readout-Rotation-Convention]] — what a readout `rotation` means (0 faces down, clockwise, y down), why the measured box outranks it for orientation, and the one front-vector table the compiler and the wall snap derive facing from.
 
 ### Subsystem: Service Architecture
 * [[UI-Service]] — Vite/React/PIXI browser client (port 5173); plugin-based modules; SSE consumer.
@@ -55,6 +57,7 @@ Velocity must never be bought by sacrificing system predictability. No runaway a
 * [[AssetForgeAgent]] — **Live** — the asset-forge agent: one request → finalized background-removed asset via the `assetForgeWorkflow` assess→[refine→generate→evaluate]→persist→charge loop; runs standalone or as a child of [[MapForgeAgent]]'s dedup barrier.
 * [[PhaseOrchestrator]] — **SUPERSEDED** (worker class deleted #613) → its sequential phase chain is now the [[MapForgeAgent]] workflow structure in [[Orchestrator-Service]].
 * [[AgenticImageGenerationPipeline]] — **SUPERSEDED** (worker class deleted #583/#613) → now the [[AssetForgeAgent]] workflow in [[Orchestrator-Service]].
+* [[Prompt-Versioning]] — When a prompt change needs a new `vN.yaml` and when it is an in-place correction: add a version when what the model is asked to PRODUCE changes, edit in place when the prompt restates a fact the CODE owns. Selection is the numeric max of FILENAMES while `metadata.version` is unvalidated (three shipped prompts disagreed); prose restating a code constant must be pinned or it goes quietly false.
 * [[Test-Capture-Wrappers]] — The `_*` invoke-var convention by which agent call sites stamp room / attempt / promptName metadata onto `rendered.parameters`, where the auditing decorators read it for capture attribution. `_promptName` is system-reserved (non-spoofable).
 
 ### Subsystem: Orchestrator (ADK + Temporal)
@@ -69,3 +72,4 @@ Velocity must never be bought by sacrificing system predictability. No runaway a
 * [[Review-Service]] — Localhost-only Fastify backend + React SPA for human review of AI output; one source — the `agent_runtime` audit DB — with signed asset images and reviewer tags persisted to `stage_tags` via a narrowly-scoped RW pool.
 * [[Review-NodeTree-UI]] — The review frontend: a data-driven LangGraph-style node tree rendering the `agent_runtime` stage/action/artifact tree as-is (no client reconstruction), with lazy artifact bodies, Monaco/image-viewer dispatch, per-node `nodeRef` tagging, and live-run polling.
 * [[Review-Capture-Pipeline]] — How Map Forge + Asset Forge runs get captured: the auditing decorators (`AuditingLLM` / `AuditingImageGenerator` / `AuditingRenderClient`) write to the `agent_runtime` tree via `AuditRunContext`; `AssetPersister` links accepted + rejected assets with a P-3 verdict.
+* [[AgentRunAudit-Sequencing]] — The ordering contract for the audit tree: the projector merges a stage's child-stages + own actions into ONE list sorted by `sequence`, so a stage's direct children must draw from a single monotonic counter (mix stages+actions on one stage → they collide). Recorder mechanisms (`startStage` explicit, `recordAction` MAX+1-over-actions, root `nextSequence`) are sibling-blind; producers coordinate. Worked examples: asset-forge generation stage (assess=0 / attempts=1..N / persists=N+1) + map-forge `discovery` sub-stage.
